@@ -6,31 +6,33 @@ import sys
 import random
 import time
 from threading import Thread
+import selectors
 
 def doubler_server(port = 8080):
 	with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 		s.bind(('', port))
 		s.listen(5)
 		s.setblocking(False)
+		sel = selectors.DefaultSelector()
+		sel.register(s, selectors.EVENT_READ)
 		while True:
-			try:
-				conn, addr = s.accept()
-			except BlockingIOError:
-				continue
-			t = Thread(target = handle_connection, args = (conn, addr))
-			t.start()
-
-def handle_connection(conn, addr):
-	print('Connected by', addr)
-	with conn:
-		while True:
-			data = conn.recv(1024)
-			if not data:
-				break
-			n = int(data.decode())
-			res = f"{n*2}\n".encode()
-			conn.send(res)
-		print('Disconnected by', addr)
+			for key, mask in sel.select():
+				if key.fileobj is s:
+					conn, addr = s.accept()
+					print('Connected by', addr)
+					conn.setblocking(False)
+					sel.register(conn, selectors.EVENT_READ)
+				else:
+					conn = key.fileobj
+					data = conn.recv(1024)
+					if not data:
+						conn.close()
+						print('Disconnected by', addr)
+						sel.unregister(conn)
+						continue
+					n = int(data.decode())
+					res = f"{n*2}\n".encode()
+					conn.send(res)
 
 def doubler_client(port = 8080):
 	with socket.create_connection(("127.0.0.1", port)) as s:
